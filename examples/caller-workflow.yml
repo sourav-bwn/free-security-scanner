@@ -1,0 +1,17 @@
+# Copy to .github/workflows/security-scan.yml in any repo you own.
+name: Security scan
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+permissions:
+  contents: read
+  issues: write
+jobs:
+  scan:
+    uses: sourav-bwn/free-security-scanner/.github/workflows/security-scan.yml@main
+    permissions:
+      contents: read
+      issues: write
+    # with:
+    #   header_url: https://your-site.example.com
