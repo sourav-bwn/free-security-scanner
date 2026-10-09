@@ -30,14 +30,28 @@ def request(method, path, payload=None):
         raise
 
 
+def normalize(finding):
+    """Accept Semgrep results or the normalized format used by the other checkers."""
+    if "check_id" in finding:
+        return {"rule": finding["check_id"], "path": finding["path"], "line": finding["start"]["line"],
+                "fp": finding.get("extra", {}).get("fingerprint"),
+                "message": finding.get("extra", {}).get("message", "Review the flagged code."),
+                "severity": finding.get("extra", {}).get("severity", "UNKNOWN"), "tool": "Semgrep CE"}
+    return {"rule": finding["id"], "path": finding["path"], "line": finding.get("line", 1),
+            "fp": "key:" + finding["key"], "message": finding["message"],
+            "severity": finding.get("severity", "UNKNOWN"), "tool": "Security checks"}
+
+
 def marker_for(finding):
     # Anonymous Semgrep CE may omit a fingerprint ("requires login").
     # Use rule, path and line as a deterministic fallback; moves may yield a new issue.
-    fingerprint = finding.get("extra", {}).get("fingerprint")
+    if "check_id" in finding:
+        finding = normalize(finding)
+    fingerprint = finding["fp"]
     if not fingerprint or fingerprint == "requires login":
-        fingerprint = str(finding["start"]["line"])
+        fingerprint = str(finding["line"])
     from hashlib import sha256
-    raw = "\0".join((finding["check_id"], finding["path"], fingerprint))
+    raw = "\0".join((finding["rule"], finding["path"], fingerprint))
     return MARKER + sha256(raw.encode()).hexdigest() + " -->"
 
 
@@ -58,17 +72,22 @@ def existing_markers(repo):
 
 
 def main():
-    if len(sys.argv) != 2:
-        raise SystemExit("Usage: security_issues.py findings.json")
-    with open(sys.argv[1], encoding="utf-8") as source:
-        data = json.load(source)
-    if data.get("errors"):
-        raise RuntimeError("Scan reported errors; not creating partial findings")
-    findings = data["results"]
-    if not isinstance(findings, list):
-        raise ValueError("Invalid Semgrep results")
+    if len(sys.argv) < 2:
+        raise SystemExit("Usage: security_issues.py findings.json [more.json ...]")
+    findings = []
+    for name in sys.argv[1:]:
+        if not os.path.exists(name):
+            continue  # optional checker did not run
+        with open(name, encoding="utf-8") as source:
+            data = json.load(source)
+        if data.get("errors"):
+            raise RuntimeError(f"{name} reported errors; not creating partial findings")
+        if not isinstance(data["results"], list):
+            raise ValueError("Invalid results in " + name)
+        findings.extend(normalize(f) for f in data["results"])
     repo = os.environ["GITHUB_REPOSITORY"]
-    if not repo.startswith("sourav-bwn/"):
+    owner = os.environ.get("ALLOWED_OWNER", "sourav-bwn")
+    if not repo.startswith(owner + "/"):
         raise ValueError("Refusing to post outside the owner's repositories")
     known = existing_markers(repo) if findings else set()
     created = 0
@@ -76,18 +95,16 @@ def main():
         marker = marker_for(finding)
         if marker in known:
             continue
-        rule = finding["check_id"]
-        path = finding["path"]
-        line = finding["start"]["line"]
-        message = finding.get("extra", {}).get("message", "Review the flagged code.")
-        severity = finding.get("extra", {}).get("severity", "UNKNOWN")
-        title = f"Security scan: {rule} in {path}"
-        # Avoid posting source snippets or secrets; findings are static-analysis leads.
-        title = " ".join(title.split())[:240]
+        rule, path, line = finding["rule"], finding["path"], finding["line"]
+        message, severity = finding["message"], finding["severity"]
+        title = " ".join(f"Security scan: {rule} in {path}".split())[:240]
         run_url = f"https://github.com/{repo}/actions/runs/{os.environ['GITHUB_RUN_ID']}"
-        file_url = (f"https://github.com/{repo}/blob/{os.environ['GITHUB_SHA']}/"
-                    f"{quote(path, safe='/')}#L{line}")
-        body = (f"{marker}\n\nSemgrep CE flagged a possible security issue. "
+        if path.startswith("http"):
+            file_url = path
+        else:
+            file_url = (f"https://github.com/{repo}/blob/{os.environ['GITHUB_SHA']}/"
+                        f"{quote(path, safe='/')}#L{line}")
+        body = (f"{marker}\n\n{finding['tool']} flagged a possible security issue. "
                 "This is not proof of an exploitable vulnerability; review before changing code.\n\n"
                 f"- Rule: `{rule}`\n- Severity: `{severity}`\n- Location: {file_url}\n"
                 f"- Scanner message: {message[:1000]}\n- Scan: {run_url}\n\n"
