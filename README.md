@@ -64,6 +64,10 @@ Requirements:
 
 - Semgrep CE, checkout and setup-python are pinned; review upstream releases before bumping. Registry rule packs are fetched on each run and can change.
 - Anonymous Semgrep CE may omit stable fingerprints. Dedup then uses rule + file + line, so moved code can open a new issue.
-- A failed or partial scan creates no issues.
+- A failed or partial scan creates no issues. Dependency audits fail closed on registry/tool errors, malformed reports, failed pip-audit installation or skipped Python dependencies. Check the failed Actions step and rerun after fixing the cause; a failed audit is not a clean bill of health.
 - `npm audit` needs a `package-lock.json`; `pip-audit` reads `requirements.txt`.
 - [Strix](https://github.com/usestrix/strix/blob/main/README.md) and [Alibaba OpenCodeReview](https://github.com/alibaba/open-code-review/blob/main/action.yml) are not enabled: they need an LLM key.
+
+## Offline tests
+
+Run `python -m unittest discover -s tests -v`. Dependency-audit tests mock subprocesses and use temporary fixture projects: they do not install packages, contact registries, scan a live site or create issues.
