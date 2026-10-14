@@ -71,3 +71,7 @@ Requirements:
 ## Offline tests
 
 Run `python -m unittest discover -s tests -v`. Dependency-audit tests mock subprocesses and use temporary fixture projects: they do not install packages, contact registries, scan a live site or create issues.
+
+## Header-check scope
+
+The optional live check validates HSTS max-age, nosniff values and framing directives, and flags an HTTPS-to-HTTP redirect. Merely sending a header name is not enough. These checks are review leads, not a CSP parser or proof that a site is secure; they do not test HTTP-to-HTTPS redirects. Header regression tests mock HTTP responses and make no live requests.
